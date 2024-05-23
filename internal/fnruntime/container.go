@@ -54,9 +54,14 @@ const (
 
 	ContainerRuntimeEnv = "KPT_FN_RUNTIME"
 
-	Docker  ContainerRuntime = "docker"
-	Podman  ContainerRuntime = "podman"
-	Nerdctl ContainerRuntime = "nerdctl"
+	Docker     ContainerRuntime = "docker"
+	Podman     ContainerRuntime = "podman"
+	Nerdctl    ContainerRuntime = "nerdctl"
+	Kubernetes ContainerRuntime = "kubernetes"
+
+	KubernetesServiceHost   string = "KUBERNETES_SERVICE_HOST"
+	KubernetesServicePort   string = "KUBERNETES_SERVICE_PORT"
+	ServiceAccountMountPath string = "/var/run/secrets/kubernetes.io/serviceaccount"
 )
 
 type ContainerRuntime string
@@ -128,8 +133,11 @@ func (f *ContainerFn) Run(reader io.Reader, writer io.Writer) error {
 		return f.runCLI(reader, writer, podmanBin, filterPodmanCLIOutput)
 	case Nerdctl:
 		return f.runCLI(reader, writer, nerdctlBin, filterNerdctlCLIOutput)
-	default:
+	case Docker:
 		return f.runCLI(reader, writer, dockerBin, filterDockerCLIOutput)
+	default:
+		// TODO
+		return nil
 	}
 }
 
@@ -382,6 +390,8 @@ func StringToContainerRuntime(v string) (ContainerRuntime, error) {
 		return Podman, nil
 	case string(Nerdctl):
 		return Nerdctl, nil
+	case string(Kubernetes):
+		return Kubernetes, nil
 	case "":
 		return Docker, nil
 	default:
@@ -397,6 +407,8 @@ func ContainerRuntimeAvailable(runtime ContainerRuntime) error {
 		return podmanCmdAvailable()
 	case Nerdctl:
 		return nerdctlCmdAvailable()
+	case Kubernetes:
+		return isInCluster()
 	default:
 		return dockerCmdAvailable()
 	}
@@ -463,6 +475,17 @@ To install nerdctl, follow the instructions at https://github.com/containerd/ner
 	cmd := exec.CommandContext(ctx, nerdctlBin, "version")
 	err := cmd.Run()
 	if err != nil {
+		return fmt.Errorf("%v\n%s", err, suggestedText)
+	}
+	return nil
+}
+
+func isInCluster() error {
+	if len(os.Getenv(KubernetesServiceHost)) == 0 || len(os.Getenv(KubernetesServicePort)) == 0 {
+		return fmt.Errorf("kubernetes runtime can only be used within cluster")
+	}
+	if info, err := os.Stat(ServiceAccountMountPath); os.IsNotExist(err) || !info.IsDir() {
+		suggestedText := "automountServiceAccountToken must be true"
 		return fmt.Errorf("%v\n%s", err, suggestedText)
 	}
 	return nil
